@@ -309,7 +309,7 @@ export default function AttachmentSheet({ open, onClose, onSelect }: AttachmentS
                 const key = 'id' in item ? item.id : 'appid' in item ? item.appid : `${item.title}-${idx}`;
                 return (
                   <button
-                    key={key}
+                    key={String(key)}
                     onClick={() => handleSelect(item)}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800/50 transition text-left"
                   >
