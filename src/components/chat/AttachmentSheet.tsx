@@ -332,7 +332,7 @@ export default function AttachmentSheet({ open, onClose, onSelect }: AttachmentS
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{item.title}</p>
                       {'artist' in item && (
-                        <p className="text-xs text-zinc-500 truncate">{item.artist}</p>
+                        <p className="text-xs text-zinc-500 truncate">{String(item.artist)}</p>
                       )}
                     </div>
                   </button>

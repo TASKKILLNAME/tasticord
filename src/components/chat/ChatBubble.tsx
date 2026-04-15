@@ -33,7 +33,7 @@ export default function ChatBubble({ message, isOwn, showTimestamp = false }: Ch
         {/* 카드 메시지 vs 일반 텍스트 */}
         {hasEmbed ? (
           <MessageCard
-            embedType={message.embed_type}
+            embedType={message.embed_type!}
             embedData={message.embed_data as Record<string, unknown>}
             isOwn={isOwn}
           />
