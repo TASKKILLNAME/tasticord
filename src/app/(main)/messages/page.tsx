@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import { MessageCircle } from 'lucide-react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { MessageCircle, Music } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Avatar from '@/components/ui/Avatar';
 import { timeAgo } from '@/lib/utils/helpers';
@@ -18,12 +18,52 @@ interface ChatRoomItem {
   unreadCount: number;
 }
 
-export default function MessagesPage() {
-  const [chatRooms, setChatRooms] = useState<ChatRoomItem[]>([]);
-  const [loading, setLoading] = useState(true);
+interface PlaylistListItem {
+  id: string;
+  name: string;
+  cover_url: string | null;
+  updated_at: string;
+  memberCount: number;
+  songCount: number;
+  myRole: 'owner' | 'editor' | 'viewer';
+}
+
+type TabKey = 'chats' | 'playlists';
+
+// 역할 뱃지 스타일
+const roleLabel = (role: string) => (role === 'owner' ? '방장' : role === 'editor' ? '편집자' : '뷰어');
+const roleBadgeClass = (role: string) =>
+  role === 'owner'
+    ? 'bg-purple-600/20 text-purple-400'
+    : role === 'editor'
+    ? 'bg-blue-600/20 text-blue-400'
+    : 'bg-zinc-700/20 text-zinc-400';
+
+function MessagesPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = useMemo(() => createClient(), []);
 
+  // URL ?tab=playlists 로 초기 탭 결정
+  const initialTab: TabKey = searchParams.get('tab') === 'playlists' ? 'playlists' : 'chats';
+  const [tab, setTab] = useState<TabKey>(initialTab);
+
+  // 대화 탭 상태
+  const [chatRooms, setChatRooms] = useState<ChatRoomItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // 플레이리스트 탭 상태
+  const [playlists, setPlaylists] = useState<PlaylistListItem[]>([]);
+  const [plLoading, setPlLoading] = useState(true);
+
+  // 탭 변경 시 URL 업데이트 (뒤로 가기 등에 대응)
+  const switchTab = (next: TabKey) => {
+    setTab(next);
+    const url = next === 'playlists' ? '/messages?tab=playlists' : '/messages';
+    window.history.replaceState(null, '', url);
+  };
+
+  // 대화 목록 로드 (기존 로직 유지)
   useEffect(() => {
     async function fetchData() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -63,6 +103,8 @@ export default function MessagesPage() {
       const roomItems: ChatRoomItem[] = [];
 
       for (const room of rooms || []) {
+        // DM만 표시 — 플레이리스트 채팅방은 아래 탭으로 분리
+        if (room.type !== 'dm') continue;
         // 상대방 찾기
         const { data: members } = await supabase
           .from('chat_members')
@@ -126,6 +168,24 @@ export default function MessagesPage() {
     fetchData();
   }, [supabase]);
 
+  // 플레이리스트 목록 로드
+  useEffect(() => {
+    async function fetchPlaylists() {
+      try {
+        const res = await fetch('/api/playlists/list');
+        if (!res.ok) {
+          setPlLoading(false);
+          return;
+        }
+        const json = await res.json();
+        setPlaylists(json.playlists || []);
+      } finally {
+        setPlLoading(false);
+      }
+    }
+    fetchPlaylists();
+  }, []);
+
   // 새 메시지 수신 시 미리보기·시간·안읽은수 실시간 업데이트
   useEffect(() => {
     const channel = supabase
@@ -181,62 +241,151 @@ export default function MessagesPage() {
     <div className="max-w-3xl mx-auto p-8 animate-fade-up">
       <h2 className="text-2xl font-bold mb-6">메시지</h2>
 
-      <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4">대화</h3>
-      {loading ? (
-        <div className="space-y-2">
-          {[1, 2].map((i) => (
-            <div key={i} className="bg-zinc-900/50 border border-zinc-800/35 rounded-xl p-4 animate-pulse flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-zinc-800" />
-              <div className="space-y-2 flex-1">
-                <div className="w-20 h-4 bg-zinc-800 rounded" />
-                <div className="w-40 h-3 bg-zinc-800 rounded" />
-              </div>
+      {/* 탭 */}
+      <div className="flex items-center gap-2 mb-6">
+        <button
+          onClick={() => switchTab('chats')}
+          className={`px-4 py-2 rounded-full text-sm font-semibold transition ${
+            tab === 'chats' ? 'bg-purple-600 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
+          }`}
+        >
+          대화
+        </button>
+        <button
+          onClick={() => switchTab('playlists')}
+          className={`px-4 py-2 rounded-full text-sm font-semibold transition ${
+            tab === 'playlists' ? 'bg-purple-600 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
+          }`}
+        >
+          플레이리스트
+        </button>
+      </div>
+
+      {tab === 'chats' ? (
+        <>
+          <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4">대화</h3>
+          {loading ? (
+            <div className="space-y-2">
+              {[1, 2].map((i) => (
+                <div key={i} className="bg-zinc-900/50 border border-zinc-800/35 rounded-xl p-4 animate-pulse flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-full bg-zinc-800" />
+                  <div className="space-y-2 flex-1">
+                    <div className="w-20 h-4 bg-zinc-800 rounded" />
+                    <div className="w-40 h-3 bg-zinc-800 rounded" />
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : chatRooms.length === 0 ? (
-        <div className="bg-zinc-900/50 border border-zinc-800/35 rounded-2xl p-8 text-center">
-          <MessageCircle className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
-          <p className="text-zinc-500">대화가 없습니다</p>
-          <p className="text-zinc-600 text-sm mt-1">친구 페이지에서 메시지를 보내보세요</p>
-        </div>
+          ) : chatRooms.length === 0 ? (
+            <div className="bg-zinc-900/50 border border-zinc-800/35 rounded-2xl p-8 text-center">
+              <MessageCircle className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
+              <p className="text-zinc-500">대화가 없습니다</p>
+              <p className="text-zinc-600 text-sm mt-1">친구 페이지에서 메시지를 보내보세요</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {chatRooms.map((room) => (
+                <button
+                  key={room.id}
+                  onClick={() => router.push(`/messages/${room.id}`)}
+                  className="w-full bg-zinc-900/50 border border-zinc-800/35 rounded-xl p-4 flex items-center gap-4 hover:bg-zinc-800/50 transition text-left"
+                >
+                  <Avatar
+                    name={room.otherUser?.nickname || '?'}
+                    imageUrl={room.otherUser?.avatar_url}
+                    size="md"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate">
+                      {room.otherUser?.nickname || '알 수 없음'}
+                    </p>
+                    <p className="text-xs text-zinc-400 truncate mt-0.5">
+                      {room.lastMessage || '메시지가 없습니다'}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    {room.lastMessageAt && (
+                      <span className="text-[10px] text-zinc-400">
+                        {timeAgo(room.lastMessageAt)}
+                      </span>
+                    )}
+                    {room.unreadCount > 0 && (
+                      <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-purple-600 text-[10px] font-bold flex items-center justify-center">
+                        {room.unreadCount > 99 ? '99+' : room.unreadCount}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       ) : (
-        <div className="space-y-2">
-          {chatRooms.map((room) => (
-            <button
-              key={room.id}
-              onClick={() => router.push(`/messages/${room.id}`)}
-              className="w-full bg-zinc-900/50 border border-zinc-800/35 rounded-xl p-4 flex items-center gap-4 hover:bg-zinc-800/50 transition text-left"
-            >
-              <Avatar
-                name={room.otherUser?.nickname || '?'}
-                imageUrl={room.otherUser?.avatar_url}
-                size="md"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm truncate">
-                  {room.otherUser?.nickname || '알 수 없음'}
-                </p>
-                <p className="text-xs text-zinc-400 truncate mt-0.5">
-                  {room.lastMessage || '메시지가 없습니다'}
-                </p>
-              </div>
-              <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                {room.lastMessageAt && (
-                  <span className="text-[10px] text-zinc-400">
-                    {timeAgo(room.lastMessageAt)}
+        // 플레이리스트 탭
+        <>
+          <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4">
+            내 플레이리스트
+          </h3>
+          {plLoading ? (
+            <div className="space-y-2">
+              {[1, 2].map((i) => (
+                <div key={i} className="bg-zinc-900/50 border border-zinc-800/35 rounded-xl p-4 animate-pulse flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-zinc-800" />
+                  <div className="space-y-2 flex-1">
+                    <div className="w-20 h-4 bg-zinc-800 rounded" />
+                    <div className="w-40 h-3 bg-zinc-800 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : playlists.length === 0 ? (
+            <div className="bg-zinc-900/50 border border-zinc-800/35 rounded-2xl p-8 text-center">
+              <Music className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
+              <p className="text-zinc-500">플레이리스트가 없습니다</p>
+              <p className="text-zinc-600 text-sm mt-1">친구와 함께 공유 플레이리스트를 만들어 보세요</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {playlists.map((pl) => (
+                <button
+                  key={pl.id}
+                  onClick={() => router.push(`/playlists/${pl.id}`)}
+                  className="w-full bg-zinc-900/50 border border-zinc-800/35 rounded-xl p-4 flex items-center gap-4 hover:bg-zinc-800/50 transition text-left"
+                >
+                  {pl.cover_url ? (
+                    <div
+                      className="w-12 h-12 rounded-lg bg-cover bg-center bg-zinc-800 flex-shrink-0"
+                      style={{ backgroundImage: `url('${pl.cover_url}')` }}
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-purple-600/30 to-pink-600/30 flex-shrink-0 flex items-center justify-center">
+                      <Music className="w-5 h-5 text-zinc-200" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm truncate">{pl.name}</p>
+                    <p className="text-xs text-zinc-400 truncate mt-0.5">
+                      {pl.songCount}곡 · 멤버 {pl.memberCount}명
+                    </p>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${roleBadgeClass(pl.myRole)}`}>
+                    {roleLabel(pl.myRole)}
                   </span>
-                )}
-                {room.unreadCount > 0 && (
-                  <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-purple-600 text-[10px] font-bold flex items-center justify-center">
-                    {room.unreadCount > 99 ? '99+' : room.unreadCount}
-                  </span>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
+  );
+}
+
+// useSearchParams는 Suspense로 감싸야 함 (Next.js 요구사항)
+export default function MessagesPage() {
+  return (
+    <Suspense fallback={<div className="max-w-3xl mx-auto p-8" />}>
+      <MessagesPageInner />
+    </Suspense>
   );
 }

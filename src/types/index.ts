@@ -65,9 +65,19 @@ export interface SharedPlaylist {
   created_by: string;
   created_at: string;
   updated_at: string;
+  cover_url?: string | null;
   members?: Profile[];
   songs?: PlaylistSong[];
   songs_count?: number;
+}
+
+export interface PlaylistMember {
+  id: string;
+  playlist_id: string;
+  user_id: string;
+  role?: 'owner' | 'editor' | 'viewer';
+  joined_at: string;
+  profile?: Profile;
 }
 
 export interface PlaylistSong {
@@ -81,6 +91,10 @@ export interface PlaylistSong {
   spotify_uri: string | null;
   apple_music_id: string | null;
   duration_ms: number | null;
+  preview_url?: string | null;
+  external_url?: string | null;
+  genre?: string | null;
+  links?: Record<string, string>;
   added_at: string;
   added_by_profile?: Profile;
 }
