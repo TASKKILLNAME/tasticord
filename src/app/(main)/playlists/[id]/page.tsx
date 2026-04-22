@@ -153,6 +153,17 @@ export default function PlaylistDetailPage() {
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const [uploadingCover, setUploadingCover] = useState(false);
 
+  // Spotify 연동 여부 + 내보내기 상태
+  const [spotifyConnected, setSpotifyConnected] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<{
+    webUrl: string;
+    appUri: string;
+    addedSongs: number;
+    totalSongs: number;
+    skipped: string[];
+  } | null>(null);
+
   const canEdit = myRole === 'owner' || myRole === 'editor';
   const isOwner = myRole === 'owner';
 
@@ -178,6 +189,49 @@ export default function PlaylistDetailPage() {
   useEffect(() => {
     loadPlaylist();
   }, [loadPlaylist]);
+
+  // Spotify 연동 여부 확인 (내보내기 버튼 표시용)
+  useEffect(() => {
+    async function checkSpotify() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('platform_connections')
+        .select('platform')
+        .eq('user_id', user.id)
+        .eq('platform', 'spotify')
+        .maybeSingle();
+      setSpotifyConnected(!!data);
+    }
+    checkSpotify();
+  }, [supabase]);
+
+  // --------------------------------------------
+  // Spotify로 내보내기
+  // --------------------------------------------
+  const handleExportSpotify = async () => {
+    if (!confirm('이 플레이리스트를 Spotify로 내보내시겠습니까?\n각 곡을 Spotify에서 검색해서 새 플레이리스트로 만듭니다.')) return;
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/playlists/${playlistId}/export-spotify`, { method: 'POST' });
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || '내보내기 실패');
+        return;
+      }
+
+      setExportResult(data);
+      // 앱 딥링크로 바로 열기 시도
+      if (data.appUri) {
+        window.location.href = data.appUri;
+      }
+    } catch {
+      alert('내보내기 중 오류가 발생했습니다');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // 페이지 벗어날 때 미리 듣기 정리
   useEffect(() => {
@@ -523,7 +577,18 @@ export default function PlaylistDetailPage() {
       <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/35 rounded-2xl p-4 sm:p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-bold">곡 목록 · {songs.length}곡</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {songs.length > 0 && spotifyConnected && (
+              <button
+                onClick={handleExportSpotify}
+                disabled={exporting}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[#1DB954]/10 border border-[#1DB954]/20 text-[#1DB954] hover:bg-[#1DB954]/20 transition disabled:opacity-50"
+                title="Spotify에 새 플레이리스트로 생성"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+                {exporting ? '내보내는 중...' : 'Spotify로 내보내기'}
+              </button>
+            )}
             {songs.length > 0 && (
               <button
                 onClick={handleCopyList}
@@ -786,6 +851,58 @@ export default function PlaylistDetailPage() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Spotify 내보내기 결과 모달 */}
+      {exportResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-800/50 rounded-2xl w-full max-w-sm shadow-2xl p-6">
+            <div className="text-center mb-4">
+              <div className="w-12 h-12 rounded-full bg-[#1DB954]/20 flex items-center justify-center mx-auto mb-3">
+                <svg className="w-6 h-6 text-[#1DB954]" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+              </div>
+              <h3 className="font-semibold text-zinc-200 text-lg">Spotify에 추가 완료</h3>
+              <p className="text-sm text-zinc-400 mt-1">
+                {exportResult.addedSongs}/{exportResult.totalSongs}곡 추가됨
+              </p>
+            </div>
+
+            {exportResult.skipped.length > 0 && (
+              <div className="bg-zinc-800/50 rounded-xl p-3 mb-4 max-h-32 overflow-y-auto">
+                <p className="text-xs text-zinc-500 mb-1">Spotify에서 찾을 수 없는 곡 ({exportResult.skipped.length}개):</p>
+                {exportResult.skipped.slice(0, 5).map((s, i) => (
+                  <p key={i} className="text-xs text-zinc-600 truncate">{s}</p>
+                ))}
+                {exportResult.skipped.length > 5 && (
+                  <p className="text-xs text-zinc-600">...외 {exportResult.skipped.length - 5}개</p>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <a
+                href={exportResult.appUri}
+                className="block w-full py-2.5 bg-[#1DB954] hover:bg-[#1ed760] text-black text-sm font-semibold rounded-xl text-center transition"
+              >
+                Spotify 앱에서 열기
+              </a>
+              <a
+                href={exportResult.webUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium rounded-xl text-center transition"
+              >
+                웹에서 열기
+              </a>
+              <button
+                onClick={() => setExportResult(null)}
+                className="w-full py-2 text-zinc-500 hover:text-zinc-300 text-sm transition"
+              >
+                닫기
+              </button>
             </div>
           </div>
         </div>
