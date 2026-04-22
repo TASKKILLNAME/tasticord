@@ -72,7 +72,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       duration_ms,
       preview_url,
       external_url,
-      genre,
     } = body;
 
     if (!title || !artist) {
@@ -95,7 +94,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           duration_ms: duration_ms || null,
           preview_url: preview_url || null,
           external_url: external_url || null,
-          genre: genre || null,
         })
         .select()
         .single(),
@@ -118,7 +116,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     return NextResponse.json({ ...song, links });
-  } catch {
+  } catch (e) {
+    console.error('POST /api/playlists/[id]/songs error:', e);
     return NextResponse.json({ error: 'Failed to add song' }, { status: 500 });
   }
 }
