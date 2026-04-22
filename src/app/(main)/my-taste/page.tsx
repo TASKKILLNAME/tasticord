@@ -875,7 +875,7 @@ export default function MyTastePage() {
                     <Loader2 className="w-5 h-5 text-zinc-500 animate-spin" />
                   </div>
                 ) : topArtists.length > 0 ? (
-                  <div className="grid grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                     {topArtists.slice(0, 8).map((artist, idx) => (
                       <a
                         key={artist.id}
@@ -1106,7 +1106,7 @@ export default function MyTastePage() {
               {/* 3. 전체 시청 목록 (그리드) */}
               <div>
                 <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4">전체 시청 목록</h4>
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {(netflixShowAll ? netflixHistory : netflixHistory.slice(0, 12)).map((item) => (
                     <div key={item.title} className="group">
                       {item.poster_url ? (

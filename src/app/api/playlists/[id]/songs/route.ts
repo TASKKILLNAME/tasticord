@@ -2,21 +2,29 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
-// Odesli(song.link) API로 곡의 각 플랫폼 링크를 한 번에 조회
-// 3초 타임아웃 — 느리면 포기하고 나중에 백필
-async function getSongLinks(url: string): Promise<Record<string, string>> {
-  if (!url) return {};
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
+type LinksStatus = 'success' | 'timeout' | 'error';
+interface LinksResult {
+  links: Record<string, string>;
+  status: LinksStatus;
+}
 
+// Odesli(song.link) API로 곡의 각 플랫폼 링크를 한 번에 조회
+// 3초 타임아웃 — 느리면 포기하고 나중에 백필. status로 타임아웃/에러를 구분.
+async function getSongLinks(url: string): Promise<LinksResult> {
+  if (!url) return { links: {}, status: 'success' };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
     const res = await fetch(
       `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(url)}`,
       { signal: controller.signal }
     );
     clearTimeout(timer);
 
-    if (!res.ok) return {};
+    if (!res.ok) {
+      console.error(`[songs] Odesli non-OK response status=${res.status} url=${url}`);
+      return { links: {}, status: 'error' };
+    }
     const data = await res.json();
     const platforms = (data?.linksByPlatform || {}) as Record<
       string,
@@ -32,9 +40,18 @@ async function getSongLinks(url: string): Promise<Record<string, string>> {
     if (platforms.youtubeMusic?.url) links.youtube_url = platforms.youtubeMusic.url;
     else if (platforms.youtube?.url) links.youtube_url = platforms.youtube.url;
 
-    return links;
-  } catch {
-    return {};
+    return { links, status: 'success' };
+  } catch (err) {
+    clearTimeout(timer);
+    const isAbort =
+      (err instanceof Error && err.name === 'AbortError') ||
+      (typeof err === 'object' && err !== null && 'name' in err && (err as { name?: string }).name === 'AbortError');
+    if (isAbort) {
+      console.warn(`[songs] Odesli timeout url=${url}`);
+      return { links: {}, status: 'timeout' };
+    }
+    console.error(`[songs] Odesli fetch error url=${url}`, err);
+    return { links: {}, status: 'error' };
   }
 }
 
@@ -79,7 +96,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     // 1) 곡 insert + Odesli 병렬 조회 (Odesli가 느려도 insert는 기다리지 않음)
-    const [insertResult, links] = await Promise.all([
+    const [insertResult, linksResult] = await Promise.all([
       admin
         .from('playlist_songs')
         .insert({
@@ -97,25 +114,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         })
         .select()
         .single(),
-      external_url ? getSongLinks(external_url) : Promise.resolve({}),
+      external_url
+        ? getSongLinks(external_url)
+        : Promise.resolve<LinksResult>({ links: {}, status: 'success' }),
     ]);
 
     if (insertResult.error || !insertResult.data) throw insertResult.error;
     const song = insertResult.data;
+    const { links, status: linksStatus } = linksResult;
 
     // 2) 플레이리스트 updated_at 갱신 (메시지 목록 정렬용)
     await admin.from('shared_playlists').update({ updated_at: new Date().toISOString() }).eq('id', id);
 
-    // 3) Odesli 링크가 있으면 비동기로 update (응답은 기다리지 않음)
+    // 3) Odesli 링크가 있으면 비동기로 update (응답은 기다리지 않음, 에러는 로깅)
     if (Object.keys(links).length > 0) {
-      admin
-        .from('playlist_songs')
-        .update({ links })
-        .eq('id', song.id)
-        .then(() => {});
+      admin.from('playlist_songs').update({ links }).eq('id', song.id)
+        .then(({ error }) => { if (error) console.error('Odesli update failed:', error); });
     }
 
-    return NextResponse.json({ ...song, links });
+    return NextResponse.json({ ...song, links, linksStatus });
   } catch (e) {
     console.error('POST /api/playlists/[id]/songs error:', e);
     return NextResponse.json({ error: 'Failed to add song' }, { status: 500 });

@@ -130,6 +130,10 @@ export default function PlaylistDetailPage() {
   const [chatRoomId, setChatRoomId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<{
+    kind: 'forbidden' | 'not_found' | 'server' | 'network';
+    message: string;
+  } | null>(null);
 
   // 검색 상태
   const [query, setQuery] = useState('');
@@ -171,20 +175,32 @@ export default function PlaylistDetailPage() {
   // 플레이리스트 상세 로드
   // --------------------------------------------
   const loadPlaylist = useCallback(async () => {
-    const res = await fetch(`/api/playlists/${playlistId}`);
-    if (!res.ok) {
-      router.push('/messages?tab=playlists');
-      return;
+    setLoadError(null);
+    try {
+      const res = await fetch(`/api/playlists/${playlistId}`);
+      if (!res.ok) {
+        if (res.status === 403) {
+          setLoadError({ kind: 'forbidden', message: '권한이 없습니다' });
+        } else if (res.status === 404) {
+          setLoadError({ kind: 'not_found', message: '플레이리스트를 찾을 수 없습니다' });
+        } else {
+          setLoadError({ kind: 'server', message: '플레이리스트를 불러오지 못했습니다' });
+        }
+        return;
+      }
+      const json = await res.json();
+      setPlaylist(json.playlist);
+      setMembers(json.members || []);
+      setSongs(json.songs || []);
+      setMyRole(json.myRole);
+      setChatRoomId(json.chatRoomId);
+      setUserId(json.userId);
+    } catch {
+      setLoadError({ kind: 'network', message: '네트워크 오류가 발생했습니다' });
+    } finally {
+      setLoading(false);
     }
-    const json = await res.json();
-    setPlaylist(json.playlist);
-    setMembers(json.members || []);
-    setSongs(json.songs || []);
-    setMyRole(json.myRole);
-    setChatRoomId(json.chatRoomId);
-    setUserId(json.userId);
-    setLoading(false);
-  }, [playlistId, router]);
+  }, [playlistId]);
 
   useEffect(() => {
     loadPlaylist();
@@ -258,7 +274,7 @@ export default function PlaylistDetailPage() {
   };
 
   // --------------------------------------------
-  // 곡 추가
+  // 곡 추가 — 전체 재로드 대신 반환된 곡을 로컬 state에 prepend
   // --------------------------------------------
   const handleAddSong = async (result: SearchResult) => {
     if (addingIds.has(result.trackId)) return;
@@ -279,7 +295,30 @@ export default function PlaylistDetailPage() {
         }),
       });
       if (res.ok) {
-        await loadPlaylist();
+        const inserted = await res.json();
+        // 서버는 playlist_songs 행 + { links, linksStatus }를 반환.
+        // 현재 사용자를 added_by_profile에 붙여서 UI에서 곧바로 표시 가능하게 함.
+        const myProfile =
+          members.find((m) => m.user_id === userId)?.profile ?? null;
+        const newSong: SongItem = {
+          id: inserted.id,
+          playlist_id: inserted.playlist_id,
+          added_by: inserted.added_by,
+          title: inserted.title,
+          artist: inserted.artist,
+          album: inserted.album ?? null,
+          image_url: inserted.image_url ?? null,
+          spotify_uri: inserted.spotify_uri ?? null,
+          apple_music_id: inserted.apple_music_id ?? null,
+          duration_ms: inserted.duration_ms ?? null,
+          preview_url: inserted.preview_url ?? null,
+          external_url: inserted.external_url ?? null,
+          genre: inserted.genre ?? null,
+          links: inserted.links ?? null,
+          added_at: inserted.added_at ?? new Date().toISOString(),
+          added_by_profile: myProfile,
+        };
+        setSongs((prev) => [newSong, ...prev]);
       }
     } finally {
       setAddingIds((prev) => {
@@ -307,12 +346,29 @@ export default function PlaylistDetailPage() {
     if (!confirm(`선택한 ${selectedSongIds.size}곡을 삭제할까요?`)) return;
 
     const ids = Array.from(selectedSongIds);
-    await Promise.all(
-      ids.map((sid) => fetch(`/api/playlists/${playlistId}/songs/${sid}`, { method: 'DELETE' }))
+    const results = await Promise.all(
+      ids.map(async (sid) => {
+        try {
+          const res = await fetch(`/api/playlists/${playlistId}/songs/${sid}`, { method: 'DELETE' });
+          return { sid, ok: res.ok };
+        } catch {
+          return { sid, ok: false };
+        }
+      }),
     );
+
+    // 성공한 것만 로컬 state에서 제거 (전체 재로드 대신 부분 업데이트)
+    const deletedIds = new Set(results.filter((r) => r.ok).map((r) => r.sid));
+    if (deletedIds.size > 0) {
+      setSongs((prev) => prev.filter((s) => !deletedIds.has(s.id)));
+    }
     setSelectedSongIds(new Set());
     setDeleteMode(false);
-    await loadPlaylist();
+
+    const failed = results.length - deletedIds.size;
+    if (failed > 0) {
+      alert(`${failed}곡은 삭제하지 못했습니다`);
+    }
   };
 
   // --------------------------------------------
@@ -428,6 +484,52 @@ export default function PlaylistDetailPage() {
     return (
       <div className="max-w-3xl mx-auto p-6 sm:p-8 animate-fade-up">
         <div className="h-32 bg-zinc-900/50 border border-zinc-800/35 rounded-2xl animate-pulse" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="max-w-3xl mx-auto p-4 sm:p-8 animate-fade-up">
+        <button
+          onClick={() => router.push('/messages?tab=playlists')}
+          className="flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-200 transition mb-4"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          플레이리스트 목록
+        </button>
+        <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800/35 rounded-2xl p-8 text-center">
+          <Music className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
+          <h2 className="text-lg font-bold mb-2">{loadError.message}</h2>
+          <p className="text-sm text-zinc-500 mb-6">
+            {loadError.kind === 'forbidden'
+              ? '이 플레이리스트에 접근할 수 있는 권한이 없습니다.'
+              : loadError.kind === 'not_found'
+              ? '삭제되었거나 존재하지 않는 플레이리스트입니다.'
+              : loadError.kind === 'network'
+              ? '네트워크 연결을 확인한 뒤 다시 시도해 주세요.'
+              : '잠시 후 다시 시도해 주세요.'}
+          </p>
+          <div className="flex items-center justify-center gap-2">
+            {(loadError.kind === 'server' || loadError.kind === 'network') && (
+              <button
+                onClick={() => {
+                  setLoading(true);
+                  loadPlaylist();
+                }}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-semibold transition"
+              >
+                다시 시도
+              </button>
+            )}
+            <button
+              onClick={() => router.push('/messages?tab=playlists')}
+              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-semibold transition"
+            >
+              목록으로
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

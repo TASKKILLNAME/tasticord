@@ -88,7 +88,7 @@ export default function MobileNav() {
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-zinc-950/80 backdrop-blur-xl border-t border-zinc-800/50 z-50">
-      <div className="flex justify-around py-2">
+      <div className="flex justify-around">
         {navItems.map(({ href, label, icon: Icon }) => {
           const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href);
           const showBadge = href === '/messages' && unreadCount > 0;
@@ -97,14 +97,14 @@ export default function MobileNav() {
             <Link
               key={href}
               href={href}
-              className={`relative flex flex-col items-center gap-1 px-3 py-1 text-[10px] transition ${
+              className={`relative flex flex-col items-center justify-center gap-1 px-3 py-2 min-h-[56px] min-w-[44px] text-xs transition ${
                 isActive ? 'text-white' : 'text-zinc-500'
               }`}
             >
               <Icon className="w-5 h-5" strokeWidth={isActive ? 2.2 : 1.5} />
               {label}
               {showBadge && (
-                <span className="absolute -top-0.5 right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-purple-600 text-[9px] font-bold flex items-center justify-center text-white">
+                <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-purple-600 text-[9px] font-bold flex items-center justify-center text-white">
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}

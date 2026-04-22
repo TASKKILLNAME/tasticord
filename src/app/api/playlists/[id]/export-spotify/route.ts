@@ -99,20 +99,70 @@ export async function POST(
       return NextResponse.json({ error: 'Spotify 플레이리스트 생성 실패' }, { status: 500 });
     }
 
-    // 100개 초과분은 추가로 업로드
-    if (trackUris.length > 100) {
-      for (let i = 100; i < trackUris.length; i += 100) {
-        const chunk = trackUris.slice(i, i + 100);
-        try {
-          await fetch(`https://api.spotify.com/v1/playlists/${spotifyPlaylist.id}/tracks`, {
+    // 100개 초과분은 추가로 업로드 — 청크별 성공/실패 카운트 + 실패 시 1회 재시도
+    // 첫 100개 청크는 createPlaylist에서 이미 처리되었으므로 성공 1개로 시작
+    let totalChunks = 1;
+    let successChunks = 1;
+    let failedChunks = 0;
+    let addedTrackCount = Math.min(trackUris.length, 100);
+
+    const postChunk = async (chunk: string[]): Promise<boolean> => {
+      try {
+        const resp = await fetch(
+          `https://api.spotify.com/v1/playlists/${spotifyPlaylist.id}/tracks`,
+          {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${token.accessToken}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({ uris: chunk }),
-          });
-        } catch { /* skip failures */ }
+          },
+        );
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => '');
+          console.error(
+            `[export-spotify] chunk upload failed status=${resp.status} playlistId=${spotifyPlaylist.id} body=${errText}`,
+          );
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.error(
+          `[export-spotify] chunk upload threw playlistId=${spotifyPlaylist.id}`,
+          err,
+        );
+        return false;
+      }
+    };
+
+    if (trackUris.length > 100) {
+      for (let i = 100; i < trackUris.length; i += 100) {
+        const chunk = trackUris.slice(i, i + 100);
+        totalChunks += 1;
+
+        let ok = await postChunk(chunk);
+
+        // 실패 시 500ms 후 1회 재시도
+        if (!ok) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          ok = await postChunk(chunk);
+          if (ok) {
+            console.log(
+              `[export-spotify] chunk retry succeeded playlistId=${spotifyPlaylist.id} offset=${i}`,
+            );
+          }
+        }
+
+        if (ok) {
+          successChunks += 1;
+          addedTrackCount += chunk.length;
+        } else {
+          failedChunks += 1;
+          console.error(
+            `[export-spotify] chunk gave up after retry playlistId=${spotifyPlaylist.id} offset=${i} size=${chunk.length}`,
+          );
+        }
       }
     }
 
@@ -121,8 +171,11 @@ export async function POST(
       appUri: `spotify:playlist:${spotifyPlaylist.id}`,
       playlistId: spotifyPlaylist.id,
       totalSongs: songs.length,
-      addedSongs: trackUris.length,
+      addedSongs: addedTrackCount,
       skipped,
+      totalChunks,
+      successChunks,
+      failedChunks,
     });
   } catch (e) {
     console.error('POST /api/playlists/[id]/export-spotify error:', e);

@@ -16,7 +16,9 @@ export default function ChatRoomPage() {
   const router = useRouter();
   const roomId = params.chatId as string;
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // ChatMessage에 client_id 필드가 없을 수 있으므로 임시 메시지 식별용으로
+  // 로컬 상태 메시지에 client_id 를 얹어서 관리한다.
+  const [messages, setMessages] = useState<Array<ChatMessage & { client_id?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
@@ -34,6 +36,10 @@ export default function ChatRoomPage() {
   const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   // currentUserId를 ref로도 보관해서 Realtime 콜백에서 최신값 참조
   const currentUserIdRef = useRef<string | null>(null);
+  // Optimistic update로 방금 추가한 임시 메시지들의 content를 추적하여
+  // Realtime INSERT로 같은 내용이 다시 오면 중복 렌더를 방지한다.
+  // (같은 내용을 연속 전송해도 insert 응답으로 받은 real id로 replace 하므로 안전)
+  const pendingTempsRef = useRef<Map<string, { content: string; embed_type: string | null }>>(new Map());
 
   // 초기 로드
   useEffect(() => {
@@ -264,12 +270,16 @@ export default function ChatRoomPage() {
   }, [loading, loadingMore, hasMore, messages, roomId, supabase]);
 
   // 텍스트 메시지 전송
+  // 중복 방지 전략: 삽입 성공 시 서버가 반환하는 real DB row로 temp 메시지를 "교체"한다.
+  // 덤으로 Realtime INSERT 핸들러는 이미 내 메시지(`sender_id === myId`)를 skip 하므로
+  // temp와 realtime 이벤트가 겹쳐 동일 메시지가 두 번 렌더되는 일이 없다.
   const handleSend = async (content: string) => {
     if (!currentUserId) return;
 
-    const tempId = crypto.randomUUID();
-    const tempMessage: ChatMessage = {
-      id: tempId,
+    const clientId = crypto.randomUUID();
+    const tempMessage: ChatMessage & { client_id: string } = {
+      id: clientId,
+      client_id: clientId,
       room_id: roomId,
       sender_id: currentUserId,
       content,
@@ -277,28 +287,46 @@ export default function ChatRoomPage() {
       embed_data: null,
       created_at: new Date().toISOString(),
     };
+    pendingTempsRef.current.set(clientId, { content, embed_type: null });
     setMessages(prev => [...prev, tempMessage]);
 
-    const { error } = await supabase.from('chat_messages').insert({
-      room_id: roomId,
-      sender_id: currentUserId,
-      content,
-    });
+    const { data: inserted, error } = await supabase
+      .from('chat_messages')
+      .insert({
+        room_id: roomId,
+        sender_id: currentUserId,
+        content,
+      })
+      .select('*, sender:profiles(*)')
+      .single();
 
-    if (error) {
+    if (error || !inserted) {
       console.error('[Chat] 메시지 전송 실패:', error);
       // 전송 실패 시 temp 메시지 제거
-      setMessages(prev => prev.filter(m => m.id !== tempId));
+      pendingTempsRef.current.delete(clientId);
+      setMessages(prev => prev.filter(m => (m as ChatMessage & { client_id?: string }).client_id !== clientId));
+      return;
     }
+
+    // temp 메시지를 서버가 돌려준 real row로 교체 (중복 방지)
+    pendingTempsRef.current.delete(clientId);
+    setMessages(prev =>
+      prev.map(m =>
+        (m as ChatMessage & { client_id?: string }).client_id === clientId
+          ? ({ ...(inserted as ChatMessage) } as ChatMessage & { client_id?: string })
+          : m
+      )
+    );
   };
 
   // 카드 메시지 전송 (음악/게임/영화 추천)
   const handleSendCard = async (embedType: 'music' | 'game' | 'movie' | null, embedData: Record<string, unknown>) => {
     if (!currentUserId || !embedType) return;
 
-    const tempId = crypto.randomUUID();
-    const tempMessage: ChatMessage = {
-      id: tempId,
+    const clientId = crypto.randomUUID();
+    const tempMessage: ChatMessage & { client_id: string } = {
+      id: clientId,
+      client_id: clientId,
       room_id: roomId,
       sender_id: currentUserId,
       content: '',
@@ -306,20 +334,37 @@ export default function ChatRoomPage() {
       embed_data: embedData,
       created_at: new Date().toISOString(),
     };
+    pendingTempsRef.current.set(clientId, { content: '', embed_type: embedType });
     setMessages(prev => [...prev, tempMessage]);
 
-    const { error } = await supabase.from('chat_messages').insert({
-      room_id: roomId,
-      sender_id: currentUserId,
-      content: '',
-      embed_type: embedType,
-      embed_data: embedData,
-    });
+    const { data: inserted, error } = await supabase
+      .from('chat_messages')
+      .insert({
+        room_id: roomId,
+        sender_id: currentUserId,
+        content: '',
+        embed_type: embedType,
+        embed_data: embedData,
+      })
+      .select('*, sender:profiles(*)')
+      .single();
 
-    if (error) {
+    if (error || !inserted) {
       console.error('[Chat] 카드 메시지 전송 실패:', error);
-      setMessages(prev => prev.filter(m => m.id !== tempId));
+      pendingTempsRef.current.delete(clientId);
+      setMessages(prev => prev.filter(m => (m as ChatMessage & { client_id?: string }).client_id !== clientId));
+      return;
     }
+
+    // temp → real row 교체
+    pendingTempsRef.current.delete(clientId);
+    setMessages(prev =>
+      prev.map(m =>
+        (m as ChatMessage & { client_id?: string }).client_id === clientId
+          ? ({ ...(inserted as ChatMessage) } as ChatMessage & { client_id?: string })
+          : m
+      )
+    );
   };
 
   return (
@@ -393,8 +438,10 @@ export default function ChatRoomPage() {
         <div ref={bottomRef} />
       </div>
 
-      {/* 입력 */}
-      <ChatInput onSend={handleSend} onSendCard={handleSendCard} onTyping={sendTyping} />
+      {/* 입력 — 모바일 하단 네비(64px, fixed bottom-0, md:hidden)에 가려지지 않도록 패딩 확보 */}
+      <div className="pb-16 md:pb-0">
+        <ChatInput onSend={handleSend} onSendCard={handleSendCard} onTyping={sendTyping} />
+      </div>
     </div>
   );
 }
