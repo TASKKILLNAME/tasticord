@@ -24,8 +24,17 @@ async function spotifyFetch(endpoint: string, accessToken: string) {
   return res.json();
 }
 
+// 재생 중이 아니거나 활성 디바이스가 없으면 Spotify가 204 No Content를 반환 (body 비어있음)
+// → 일반 spotifyFetch는 JSON.parse('')로 터지므로 별도 처리
 export async function getCurrentlyPlaying(accessToken: string) {
-  return spotifyFetch('/me/player/currently-playing', accessToken);
+  const res = await fetch(`${SPOTIFY_API_BASE}/me/player/currently-playing`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`Spotify API error: ${res.status}`);
+  const text = await res.text();
+  if (!text) return null;
+  return JSON.parse(text);
 }
 
 export async function getTopTracks(accessToken: string, timeRange: string = 'medium_term', limit: number = 20) {
