@@ -51,9 +51,10 @@ export async function searchTrack(accessToken: string, query: string) {
 }
 
 // 빈 Spotify 플레이리스트 생성 — 트랙 추가는 별도 호출(addTracksToPlaylist) 사용
-// 실패 시 상세 에러를 throw 해서 호출 측에서 적절히 처리하도록 한다.
-export async function createPlaylist(accessToken: string, userId: string, name: string) {
-  const createRes = await fetch(`${SPOTIFY_API_BASE}/users/${userId}/playlists`, {
+// 2026-03 마이그레이션 이후 Dev Mode 앱은 /users/{id}/playlists 사용 불가 → /me/playlists 사용
+// userId 인자는 호환을 위해 받지만 더 이상 URL에 사용하지 않음
+export async function createPlaylist(accessToken: string, _userId: string, name: string) {
+  const createRes = await fetch(`${SPOTIFY_API_BASE}/me/playlists`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -87,7 +88,7 @@ export async function addTracksToPlaylist(
     return false;
   }
   try {
-    const res = await fetch(`${SPOTIFY_API_BASE}/playlists/${playlistId}/tracks`, {
+    const res = await fetch(`${SPOTIFY_API_BASE}/playlists/${playlistId}/items`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
