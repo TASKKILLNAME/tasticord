@@ -2,6 +2,26 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 
+// ─── 업로드 중 락 (race condition 방지) ────────────────────────
+// 같은 유저가 짧은 시간 내 중복 업로드를 시도하는 것을 막기 위한 in-memory Map
+// 서버리스 환경에서는 인스턴스별로 동작하지만, 단일 사용자의 더블클릭 방지에는 충분
+const UPLOAD_LOCK_TTL_MS = 30_000;
+const uploadLocks = new Map<string, number>();
+
+function acquireUploadLock(userId: string): boolean {
+  const now = Date.now();
+  const existing = uploadLocks.get(userId);
+  if (existing && now - existing < UPLOAD_LOCK_TTL_MS) {
+    return false;
+  }
+  uploadLocks.set(userId, now);
+  return true;
+}
+
+function releaseUploadLock(userId: string) {
+  uploadLocks.delete(userId);
+}
+
 // ─── CSV 파싱 헬퍼 ─────────────────────────────────────────────
 
 /**
@@ -102,7 +122,10 @@ interface TmdbResult {
   posterUrl: string | null;
   genres: string[];
   mediaType: string | null;
+  timedOut?: boolean;
 }
+
+const TMDB_TIMEOUT_MS = 3000;
 
 async function fetchFromTmdb(title: string): Promise<TmdbResult> {
   const apiKey = process.env.TMDB_API_KEY;
@@ -125,31 +148,56 @@ async function fetchFromTmdb(title: string): Promise<TmdbResult> {
     return null;
   };
 
-  // 1차 시도: 한국어(ko-KR) 검색
+  // AbortController로 3초 타임아웃 적용
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TMDB_TIMEOUT_MS);
+
   try {
-    const res = await fetch(`https://api.themoviedb.org/3/search/multi?api_key=${apiKey}&query=${encodeURIComponent(title)}&language=ko-KR`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.results?.length > 0) {
-        const result = extractResult(data.results[0]);
-        if (result) return result;
+    // 1차 시도: 한국어(ko-KR) 검색
+    try {
+      const res = await fetch(
+        `https://api.themoviedb.org/3/search/multi?api_key=${apiKey}&query=${encodeURIComponent(title)}&language=ko-KR`,
+        { signal: controller.signal }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results?.length > 0) {
+          const result = extractResult(data.results[0]);
+          if (result) return result;
+        }
+      }
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        console.warn(`[Netflix Upload] TMDB ko-KR 타임아웃: "${title}"`);
+        return { posterUrl: null, genres: [], mediaType: null, timedOut: true };
+      }
+      // 기타 에러는 en-US로 재시도
+    }
+
+    // 2차 시도: 영문(en-US) 검색
+    try {
+      const res = await fetch(
+        `https://api.themoviedb.org/3/search/multi?api_key=${apiKey}&query=${encodeURIComponent(title)}&language=en-US`,
+        { signal: controller.signal }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results?.length > 0) {
+          const result = extractResult(data.results[0]);
+          if (result) return result;
+        }
+      }
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        console.warn(`[Netflix Upload] TMDB en-US 타임아웃: "${title}"`);
+        return { posterUrl: null, genres: [], mediaType: null, timedOut: true };
       }
     }
-  } catch { /* 영문으로 재시도 */ }
 
-  // 2차 시도: 영문(en-US) 검색
-  try {
-    const res = await fetch(`https://api.themoviedb.org/3/search/multi?api_key=${apiKey}&query=${encodeURIComponent(title)}&language=en-US`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.results?.length > 0) {
-        const result = extractResult(data.results[0]);
-        if (result) return result;
-      }
-    }
-  } catch { /* 실패 */ }
-
-  return { posterUrl: null, genres: [], mediaType: null };
+    return { posterUrl: null, genres: [], mediaType: null };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
@@ -167,7 +215,7 @@ interface EnrichedItem {
 
 /**
  * TMDB API 호출을 5개씩 묶어서 병렬 처리 (rate limit 방지)
- * - 이미 포스터가 저장된 작품은 스킵
+ * - 이미 포스터가 저장된 작품은 스킵 (existingDataMap 캐싱)
  * - 포스터 + 장르 + 미디어 타입을 함께 가져옴
  */
 async function fetchTmdbInBatches(
@@ -177,20 +225,28 @@ async function fetchTmdbInBatches(
   const results: EnrichedItem[] = [];
   const BATCH_SIZE = 5;
 
+  // 캐싱 통계
+  let cacheHits = 0;
+  let tmdbCalls = 0;
+  let tmdbTimeouts = 0;
+
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
 
     const batchResults = await Promise.allSettled(
       batch.map(async (item) => {
-        // 이미 저장된 데이터가 있으면 TMDB 호출 스킵
+        // 이미 저장된 데이터가 있으면 TMDB 호출 스킵 (캐시 히트)
         const existing = existingData.get(item.title);
         if (existing) {
+          cacheHits++;
           return { ...item, posterUrl: existing.posterUrl, genres: existing.genres, mediaType: null };
         }
 
         // TMDB에서 포스터 + 장르 가져오기
+        tmdbCalls++;
         const tmdb = await fetchFromTmdb(item.title);
-        return { ...item, ...tmdb };
+        if (tmdb.timedOut) tmdbTimeouts++;
+        return { ...item, posterUrl: tmdb.posterUrl, genres: tmdb.genres, mediaType: tmdb.mediaType };
       })
     );
 
@@ -201,12 +257,18 @@ async function fetchTmdbInBatches(
     }
   }
 
+  console.log(
+    `[Netflix Upload] TMDB 처리 결과: 전체 ${items.length}개 / 캐시 히트 ${cacheHits}개 / TMDB 호출 ${tmdbCalls}개 / 타임아웃 ${tmdbTimeouts}개`
+  );
+
   return results;
 }
 
 // ─── API 라우트 핸들러 ─────────────────────────────────────────
 
 export async function POST(request: Request) {
+  let lockedUserId: string | null = null;
+
   try {
     // 1. 인증 확인
     const supabase = await createClient();
@@ -214,6 +276,16 @@ export async function POST(request: Request) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // 1-1. 업로드 중 락 확인 (race condition 방지)
+    if (!acquireUploadLock(user.id)) {
+      console.warn(`[Netflix Upload] 중복 업로드 시도 차단: user=${user.id}`);
+      return NextResponse.json(
+        { error: '이미 업로드 중입니다' },
+        { status: 429 }
+      );
+    }
+    lockedUserId = user.id;
 
     // 2. FormData에서 CSV 파일 추출
     const formData = await request.formData();
@@ -243,14 +315,19 @@ export async function POST(request: Request) {
     }));
     const uniqueItems = deduplicateByTitle(parsedItems);
 
-    // 5. 기존에 저장된 포스터+장르 정보 조회 (TMDB 호출 최소화)
+    // 5. 기존에 저장된 포스터+장르 정보 조회 (TMDB 호출 최소화 — 캐싱)
     const admin = createAdminClient();
-    const { data: existingRows } = await admin
+    const { data: existingRows, error: fetchError } = await admin
       .from('netflix_history')
       .select('title, poster_url, metadata')
       .eq('user_id', user.id);
 
+    if (fetchError) {
+      console.error('[Netflix Upload] 기존 데이터 조회 실패:', fetchError);
+    }
+
     // 기존 데이터 맵: title → { posterUrl, genres }
+    // 같은 제목을 재업로드해도 TMDB 재조회 없이 캐시된 값 사용
     const existingDataMap = new Map<string, { posterUrl: string; genres: string[] }>();
     for (const row of existingRows || []) {
       if (row.poster_url) {
@@ -258,15 +335,24 @@ export async function POST(request: Request) {
         existingDataMap.set(row.title, { posterUrl: row.poster_url, genres });
       }
     }
+    console.log(`[Netflix Upload] 기존 캐시 데이터: ${existingDataMap.size}개 / 신규 업로드 대상: ${uniqueItems.length}개`);
 
     // 6. TMDB에서 포스터 + 장르 가져오기 (5개씩 병렬)
     const itemsWithPosters = await fetchTmdbInBatches(uniqueItems, existingDataMap);
 
     // 7. 기존 데이터 삭제 (재업로드 시 전체 교체)
-    await admin
+    const { error: deleteError } = await admin
       .from('netflix_history')
       .delete()
       .eq('user_id', user.id);
+
+    if (deleteError) {
+      console.error('[Netflix Upload] 기존 데이터 삭제 실패:', deleteError);
+      return NextResponse.json(
+        { error: '업로드 처리 중 오류가 발생했습니다' },
+        { status: 500 }
+      );
+    }
 
     // 8. 새 데이터 삽입
     const insertData = itemsWithPosters.map(item => ({
@@ -283,8 +369,9 @@ export async function POST(request: Request) {
       .insert(insertData);
 
     if (insertError) {
+      console.error('[Netflix Upload] 데이터 삽입 실패:', insertError);
       return NextResponse.json(
-        { error: `저장 실패: ${insertError.message}` },
+        { error: '저장 중 오류가 발생했습니다' },
         { status: 500 }
       );
     }
@@ -296,10 +383,16 @@ export async function POST(request: Request) {
       message: `${itemsWithPosters.length}개의 작품이 저장되었습니다`,
     });
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : 'Unknown error';
+    // 실제 에러는 서버 로그에만 기록, 클라이언트에는 일반 메시지
+    console.error('[Netflix Upload] 처리 실패:', e);
     return NextResponse.json(
-      { error: `업로드 처리 실패: ${message}` },
+      { error: '업로드 처리 중 오류가 발생했습니다' },
       { status: 500 }
     );
+  } finally {
+    // 성공/실패 관계없이 락 해제
+    if (lockedUserId) {
+      releaseUploadLock(lockedUserId);
+    }
   }
 }

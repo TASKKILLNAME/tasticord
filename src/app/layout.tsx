@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Outfit, Noto_Sans_KR } from 'next/font/google';
 import './globals.css';
+import { ToastProvider } from '@/components/ui/ToastProvider';
 
 const outfit = Outfit({
   subsets: ['latin'],
@@ -21,7 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ko" className="dark">
       <body className={`${outfit.variable} ${notoSansKr.variable} font-sans bg-[#09090b] text-zinc-200`}>
-        {children}
+        <ToastProvider>
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );

@@ -309,7 +309,7 @@ export default function AttachmentSheet({ open, onClose, onSelect }: AttachmentS
                 const key = 'id' in item ? item.id : 'appid' in item ? item.appid : `${item.title}-${idx}`;
                 return (
                   <button
-                    key={key}
+                    key={String(key)}
                     onClick={() => handleSelect(item)}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-zinc-800/50 transition text-left"
                   >
@@ -332,7 +332,7 @@ export default function AttachmentSheet({ open, onClose, onSelect }: AttachmentS
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{item.title}</p>
                       {'artist' in item && (
-                        <p className="text-xs text-zinc-500 truncate">{item.artist}</p>
+                        <p className="text-xs text-zinc-500 truncate">{String(item.artist)}</p>
                       )}
                     </div>
                   </button>

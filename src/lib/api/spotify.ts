@@ -50,7 +50,9 @@ export async function searchTrack(accessToken: string, query: string) {
   return spotifyFetch(`/search?q=${encodeURIComponent(query)}&type=track&limit=10`, accessToken);
 }
 
-export async function createPlaylist(accessToken: string, userId: string, name: string, trackUris: string[]) {
+// 빈 Spotify 플레이리스트 생성 — 트랙 추가는 별도 호출(addTracksToPlaylist) 사용
+// 실패 시 상세 에러를 throw 해서 호출 측에서 적절히 처리하도록 한다.
+export async function createPlaylist(accessToken: string, userId: string, name: string) {
   const createRes = await fetch(`${SPOTIFY_API_BASE}/users/${userId}/playlists`, {
     method: 'POST',
     headers: {
@@ -59,10 +61,33 @@ export async function createPlaylist(accessToken: string, userId: string, name: 
     },
     body: JSON.stringify({ name, public: false }),
   });
-  const playlist = await createRes.json();
 
-  if (trackUris.length > 0) {
-    await fetch(`${SPOTIFY_API_BASE}/playlists/${playlist.id}/tracks`, {
+  if (!createRes.ok) {
+    const errText = await createRes.text().catch(() => '');
+    throw new Error(`Spotify createPlaylist failed: status=${createRes.status} body=${errText}`);
+  }
+
+  const playlist = await createRes.json();
+  if (!playlist?.id) {
+    throw new Error('Spotify createPlaylist: id missing in response');
+  }
+  return playlist;
+}
+
+// 플레이리스트에 트랙 추가 — 응답 검증, 한 번에 최대 100개 제한 지킴
+// 실패 시 false 반환 + 콘솔 에러 (호출 측에서 청크별 카운트)
+export async function addTracksToPlaylist(
+  accessToken: string,
+  playlistId: string,
+  trackUris: string[],
+): Promise<boolean> {
+  if (trackUris.length === 0) return true;
+  if (trackUris.length > 100) {
+    console.error(`[spotify] addTracksToPlaylist: chunk size ${trackUris.length} > 100`);
+    return false;
+  }
+  try {
+    const res = await fetch(`${SPOTIFY_API_BASE}/playlists/${playlistId}/tracks`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -70,9 +95,16 @@ export async function createPlaylist(accessToken: string, userId: string, name: 
       },
       body: JSON.stringify({ uris: trackUris }),
     });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error(`[spotify] addTracksToPlaylist failed status=${res.status} body=${errText}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('[spotify] addTracksToPlaylist threw', err);
+    return false;
   }
-
-  return playlist;
 }
 
 export { refreshAccessToken };

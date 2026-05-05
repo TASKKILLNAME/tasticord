@@ -1,9 +1,19 @@
 'use client';
 
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function LoginPage() {
-  const { signInWithKakao } = useAuth();
+  const router = useRouter();
+  const { signInWithKakao, currentUser, loading } = useAuth();
+
+  // 이미 로그인된 상태면 홈으로 리다이렉트
+  useEffect(() => {
+    if (!loading && currentUser) {
+      router.replace('/');
+    }
+  }, [loading, currentUser, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#09090b] relative overflow-hidden">
