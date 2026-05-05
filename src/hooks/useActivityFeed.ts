@@ -36,9 +36,19 @@ export function useActivityFeed() {
       .on('presence', { event: 'sync' }, refresh)
       .on('presence', { event: 'join' }, refresh)
       .on('presence', { event: 'leave' }, refresh)
-      .subscribe();
+      .subscribe((status) => {
+        // 활동 중인 유저가 0명이면 sync 이벤트가 안 올 수 있어
+        // 구독 성공 시점에 일단 loading을 풀고 빈 상태를 보여준다
+        if (status === 'SUBSCRIBED') {
+          refresh();
+        }
+      });
+
+    // 안전망: 3초 안에 어떤 이벤트도 안 오면 강제로 로딩 해제
+    const timer = setTimeout(() => setLoading(false), 3000);
 
     return () => {
+      clearTimeout(timer);
       supabase.removeChannel(channel);
     };
   }, []);
