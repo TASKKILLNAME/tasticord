@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Profile, Activity } from '@/types';
+import type { Profile } from '@/types';
 
 interface AppState {
   currentUser: Profile | null;

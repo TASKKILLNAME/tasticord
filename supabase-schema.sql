@@ -150,6 +150,23 @@ CREATE TABLE taste_cache (
   UNIQUE(user_id, platform, data_type)
 );
 
+-- 현재 활동 캐시 (유저당 kind별 1행 upsert)
+-- 폴링으로 갱신되며, 4분 이내 = 지금 활동 중 / 3시간 이내 = 피드 노출
+-- kind: 'music'(Spotify 등) | 'game'(Steam 등) — 동시 캐싱 가능
+CREATE TABLE user_now_playing (
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'music' CHECK (kind IN ('music', 'game')),
+  platform TEXT NOT NULL,
+  track_id TEXT,
+  title TEXT NOT NULL,
+  artist TEXT,
+  album_image_url TEXT,
+  external_url TEXT,
+  played_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, kind)
+);
+
 -- Netflix CSV 업로드 데이터
 CREATE TABLE netflix_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -176,6 +193,7 @@ ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE taste_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE taste_cache ENABLE ROW LEVEL SECURITY;
 ALTER TABLE netflix_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_now_playing ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
 -- RLS 정책
@@ -257,6 +275,13 @@ CREATE POLICY "Users can read own cache" ON taste_cache FOR SELECT USING (auth.u
 -- netflix_history: 본인 기록 관리
 CREATE POLICY "Users can manage own netflix" ON netflix_history FOR ALL USING (auth.uid() = user_id);
 
+-- user_now_playing: 본인 + 친구 행 읽기, 본인 행 upsert
+CREATE POLICY "Users can read friend now_playing" ON user_now_playing FOR SELECT USING (
+  auth.uid() = user_id OR
+  user_id IN (SELECT friend_id FROM friendships WHERE user_id = auth.uid())
+);
+CREATE POLICY "Users can manage own now_playing" ON user_now_playing FOR ALL USING (auth.uid() = user_id);
+
 -- 인덱스
 CREATE INDEX idx_activities_user_id ON activities(user_id);
 CREATE INDEX idx_activities_created_at ON activities(created_at DESC);
@@ -265,3 +290,4 @@ CREATE INDEX idx_friendships_friend_id ON friendships(friend_id);
 CREATE INDEX idx_chat_messages_room_id ON chat_messages(room_id, created_at DESC);
 CREATE INDEX idx_playlist_songs_playlist_id ON playlist_songs(playlist_id);
 CREATE INDEX idx_taste_cache_user_platform ON taste_cache(user_id, platform, data_type);
+CREATE INDEX idx_user_now_playing_played_at ON user_now_playing(played_at DESC);

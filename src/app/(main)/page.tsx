@@ -1,24 +1,41 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import ActivityCard from '@/components/feed/ActivityCard';
+import { useEffect, useMemo, useState } from 'react';
+import NowPlayingCard from '@/components/feed/NowPlayingCard';
 import Chip from '@/components/ui/Chip';
-import { useActivityFeed } from '@/hooks/useActivityFeed';
+import { useNowPlayingFeed } from '@/hooks/useNowPlayingFeed';
 import { FEED_FILTERS, FILTER_TO_PLATFORM } from '@/lib/utils/constants';
 
 export default function FeedPage() {
-  const [activeFilter, setActiveFilter] = useState('전체');
-  const { activities, loading } = useActivityFeed();
+  const [activeFilter, setActiveFilter] = useState<string>('전체');
+  const { items, loading, refresh } = useNowPlayingFeed();
+
+  // 홈 페이지 진입 시 본인 캐시도 즉시 갱신 (3분 폴링과 별개로 즉시 1회)
+  // 그 후 피드 재조회 → 본인 새 캐시까지 반영된 결과로 표시
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await fetch('/api/now-playing/sync', { method: 'POST' });
+      } catch {
+        // sync 실패해도 피드 자체는 useNowPlayingFeed가 이미 호출 중이라 무시
+      }
+      if (!cancelled) refresh();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh]);
 
   const filtered = useMemo(() => {
     const platforms = FILTER_TO_PLATFORM[activeFilter];
-    if (!platforms || platforms.length === 0) return activities;
-    return activities.filter((a) => platforms.includes(a.platform));
-  }, [activities, activeFilter]);
+    if (!platforms || platforms.length === 0) return items;
+    return items.filter((it) => platforms.includes(it.platform));
+  }, [items, activeFilter]);
 
   return (
     <div className="animate-fade-up">
-      {/* Filter bar */}
+      {/* 섹션 필터 */}
       <div className="sticky top-0 z-10 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-800/50 px-8 py-4">
         <div className="flex space-x-2 max-w-3xl mx-auto">
           {FEED_FILTERS.map((filter) => (
@@ -32,7 +49,6 @@ export default function FeedPage() {
         </div>
       </div>
 
-      {/* Feed */}
       <div className="max-w-3xl mx-auto p-8 space-y-6">
         {loading ? (
           <div className="space-y-6">
@@ -54,14 +70,18 @@ export default function FeedPage() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20">
-            <div className="text-zinc-400 text-lg">지금 활동 중인 친구가 없습니다</div>
+            <div className="text-zinc-400 text-lg">
+              {activeFilter === '전체'
+                ? '최근 활동이 없습니다'
+                : `${activeFilter} 활동이 없습니다`}
+            </div>
             <p className="text-zinc-500 text-sm mt-2">
-              플랫폼을 연동하고 친구를 추가하면, 친구가 음악/게임을 즐기는 순간이 실시간으로 표시됩니다
+              플랫폼을 연동하고 친구를 추가하면 활동이 여기에 표시됩니다
             </p>
           </div>
         ) : (
-          filtered.map((activity) => (
-            <ActivityCard key={activity.user_id} activity={activity} />
+          filtered.map((item) => (
+            <NowPlayingCard key={`${item.user_id}-${item.kind}`} item={item} />
           ))
         )}
       </div>
