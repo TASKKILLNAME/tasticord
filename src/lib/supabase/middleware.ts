@@ -13,8 +13,9 @@ export async function updateSession(request: NextRequest) {
 
   // 세션 쿠키가 아예 없으면 Supabase 호출 자체를 스킵 (auth 페이지로만 리다이렉트)
   // 이렇게 하면 비로그인 트래픽이 미들웨어에서 네트워크 호출을 안 하게 됨
+  // Supabase는 토큰을 청크로 분할해 쿠키 이름이 sb-xxx-auth-token, .0, .1 등 다양 → includes로 체크
   const hasSessionCookie = request.cookies.getAll().some((c) =>
-    c.name.startsWith('sb-') && c.name.endsWith('-auth-token')
+    c.name.startsWith('sb-') && c.name.includes('auth-token')
   );
   if (!hasSessionCookie && !request.nextUrl.pathname.startsWith('/auth')) {
     const url = request.nextUrl.clone();
