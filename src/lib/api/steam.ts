@@ -1,3 +1,5 @@
+import { getCachedMetadata, setCachedMetadata } from '@/lib/wrapped/metadata-cache';
+
 const STEAM_API_BASE = 'https://api.steampowered.com';
 
 async function steamFetch(endpoint: string) {
@@ -41,7 +43,32 @@ export async function getAppDetails(appId: number) {
   return data?.[String(appId)]?.success ? data[String(appId)].data : null;
 }
 
-// 여러 게임의 장르를 가져와서 장르별 플레이타임 집계
+interface SteamGenreEntry {
+  id?: string;
+  description: string;
+}
+
+// 게임 장르만 캐시해서 가져오기 — 30일 TTL, 전역 공유
+// fetchGenreStats가 호출하는 핵심 헬퍼. getAppDetails 전체 응답이 아니라 genres만 저장.
+const STEAM_APP_GENRES_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+export async function getAppGenresCached(appId: number): Promise<SteamGenreEntry[] | null> {
+  const cacheKey = String(appId);
+  const cached = await getCachedMetadata<SteamGenreEntry[]>(
+    'steam_app_genres',
+    cacheKey,
+    STEAM_APP_GENRES_TTL_MS
+  );
+  if (cached) return cached;
+
+  const details = await getAppDetails(appId);
+  const genres: SteamGenreEntry[] = details?.genres ?? [];
+  // 빈 배열도 캐시 (안 캐시하면 매번 재호출 — DLC/제거된 게임도 한 번에 컷)
+  await setCachedMetadata('steam_app_genres', cacheKey, genres);
+  return genres;
+}
+
+// 여러 게임의 장르를 가져와서 장르별 플레이타임 집계 (캐시 적용)
 // games: [{ appid, playtime_minutes }] 형태
 export async function fetchGenreStats(games: Array<{ appid: number; name: string; playtime_minutes: number }>) {
   const genreMap: Record<string, { playtime: number; count: number }> = {};
@@ -51,19 +78,19 @@ export async function fetchGenreStats(games: Array<{ appid: number; name: string
     .filter(g => g.playtime_minutes > 0)
     .slice(0, 15);
 
-  // 5개씩 병렬 호출 (Steam Store API 레이트 리밋 방지)
+  // 5개씩 병렬 호출 (캐시 hit이면 즉시 반환, miss만 Steam Store API 거침)
   for (let i = 0; i < topGames.length; i += 5) {
     const batch = topGames.slice(i, i + 5);
     const results = await Promise.allSettled(
-      batch.map(game => getAppDetails(game.appid))
+      batch.map(game => getAppGenresCached(game.appid))
     );
 
     results.forEach((result, idx) => {
-      if (result.status !== 'fulfilled' || !result.value?.genres) return;
+      if (result.status !== 'fulfilled' || !result.value) return;
       const game = batch[idx];
 
-      for (const genre of result.value.genres) {
-        const name = genre.description as string;
+      for (const genre of result.value) {
+        const name = genre.description;
         if (!genreMap[name]) {
           genreMap[name] = { playtime: 0, count: 0 };
         }

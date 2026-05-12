@@ -53,11 +53,12 @@ interface AttachmentSheetProps {
   open: boolean;
   onClose: () => void;
   onSelect: <T extends EmbedType>(type: T, data: EmbedPayload[NonNullable<T>]) => void;
+  title?: string; // 헤더 텍스트 (기본: '추천 카드 보내기')
 }
 
 type Tab = 'music' | 'game' | 'movie';
 
-export default function AttachmentSheet({ open, onClose, onSelect }: AttachmentSheetProps) {
+export default function AttachmentSheet({ open, onClose, onSelect, title = '추천 카드 보내기' }: AttachmentSheetProps) {
   const [tab, setTab] = useState<Tab>('music');
   const [search, setSearch] = useState('');
 
@@ -255,7 +256,7 @@ export default function AttachmentSheet({ open, onClose, onSelect }: AttachmentS
       <div className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-950 border-t border-zinc-800 rounded-t-2xl max-h-[70vh] flex flex-col animate-slide-up">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800/50">
-          <h3 className="font-semibold">추천 카드 보내기</h3>
+          <h3 className="font-semibold">{title}</h3>
           <button onClick={onClose} className="text-zinc-400 hover:text-white transition">
             <X className="w-5 h-5" />
           </button>

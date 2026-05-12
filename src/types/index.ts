@@ -1,5 +1,5 @@
 export type Platform = 'spotify' | 'apple_music' | 'steam' | 'netflix';
-export type ActivityType = 'listening' | 'playing' | 'watching' | 'liked' | 'playlist_add';
+export type ActivityType = 'listening' | 'playing' | 'watching' | 'liked' | 'playlist_add' | 'recommend';
 export type ChatType = 'dm' | 'playlist';
 export type EmbedType = 'music' | 'game' | 'movie';
 

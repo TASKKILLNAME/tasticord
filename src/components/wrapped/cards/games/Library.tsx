@@ -1,8 +1,14 @@
 // 게임 카드 7 — Library + Backlog
 // 보유 / 플레이 / 미플레이 수를 동시에 보여줌. Backlog 비율이 핵심 임팩트.
+// 카드 진입 시 보유 게임 수/미플레이 수/Backlog % 카운트업 애니메이션
+'use client';
+
+import { useEffect, useState } from 'react';
 import CardShell from '../../CardShell';
 import type { Tone } from '@/lib/wrapped/tones';
 import type { WrappedLibraryStats } from '@/lib/wrapped/game-types';
+
+const COUNT_UP_MS = 1400;
 
 interface Props {
   tone: Tone;
@@ -15,6 +21,24 @@ interface Props {
 export default function Library({ tone, data, gameImages, userName, userAvatarUrl }: Props) {
   // 무한 루프를 위해 이미지 리스트 2벌 (-50% 이동 시 시작점과 동일 → 끊김 없음)
   const marqueeImages = gameImages && gameImages.length > 0 ? [...gameImages, ...gameImages] : [];
+
+  // 진입 시 숫자 카운트업 — 0→실제값 (ease-out cubic, 1.4s)
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    const start = performance.now();
+    let frame: number;
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / COUNT_UP_MS, 1);
+      setProgress(1 - Math.pow(1 - t, 3));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const animatedOwned = Math.round(data.total_owned * progress);
+  const animatedUnplayed = Math.round(data.unplayed * progress);
+  const animatedUnplayedPct = Math.round(data.unplayed_pct * progress);
 
   return (
     <CardShell tone={tone} eyebrow="소유한 게임" userName={userName} userAvatarUrl={userAvatarUrl} footerRight="POWERED BY STEAM">
@@ -126,7 +150,7 @@ export default function Library({ tone, data, gameImages, userName, userAvatarUr
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {data.total_owned.toLocaleString()}
+            {animatedOwned.toLocaleString()}
           </div>
           <div
             style={{
@@ -174,7 +198,7 @@ export default function Library({ tone, data, gameImages, userName, userAvatarUr
               letterSpacing: '-0.01em',
             }}
           >
-            구매 후 플레이 하지 않은 {data.unplayed}개
+            구매 후 플레이 하지 않은 {animatedUnplayed}개
           </div>
         </div>
         <div
@@ -186,7 +210,7 @@ export default function Library({ tone, data, gameImages, userName, userAvatarUr
             fontVariantNumeric: 'tabular-nums',
           }}
         >
-          {data.unplayed_pct}
+          {animatedUnplayedPct}
           <span style={{ fontSize: 16, fontWeight: 600, marginLeft: 2 }}>%</span>
         </div>
       </div>

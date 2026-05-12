@@ -18,6 +18,7 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   watching: '시청 중',
   liked: '좋아요',
   playlist_add: '플레이리스트 추가',
+  recommend: '추천',
 };
 
 export const FEED_FILTERS = ['전체', '음악', '게임', '영화/TV'] as const;

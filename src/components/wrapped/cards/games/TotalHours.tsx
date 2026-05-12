@@ -1,5 +1,9 @@
 // 게임 카드 5 — 누적 시간 (SINGLE BIG NUMBER)
 // 핵심: 큰 시간 숫자 + 일 환산 카피
+// 카드 진입 시 숫자(총 시간/일수/최저시급) 카운트업 애니메이션
+'use client';
+
+import { useEffect, useState } from 'react';
 import CardShell from '../../CardShell';
 import type { Tone } from '@/lib/wrapped/tones';
 import type { WrappedTotalHours } from '@/lib/wrapped/game-types';
@@ -12,7 +16,7 @@ interface Props {
 }
 
 // 한국 최저시급 (2025년 기준 — 매년 갱신 필요)
-const MIN_WAGE_KRW = 10030;
+const MIN_WAGE_KRW = 10320;
 
 // 카드 가운데 들어가는 아날로그 시계 (시침/분침/초침 회전)
 function AnalogClock({
@@ -116,12 +120,32 @@ function AnalogClock({
   );
 }
 
+const COUNT_UP_MS = 1400;
+
 export default function TotalHours({ tone, data, userName, userAvatarUrl }: Props) {
   // 자릿수에 따라 폰트 자동 조정 — "시간" 접미사까지 한 줄에 들어가도록 보수적으로
   const digits = String(data.total_hours).length;
   const fontSize = digits >= 5 ? 80 : digits >= 4 ? 108 : 140;
 
   const earnings = data.total_hours * MIN_WAGE_KRW;
+
+  // 카드 진입 시 숫자가 0→실제값으로 카운트업 (ease-out cubic, 1.4s)
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    const start = performance.now();
+    let frame: number;
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / COUNT_UP_MS, 1);
+      setProgress(1 - Math.pow(1 - t, 3));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const animatedHours = Math.round(data.total_hours * progress);
+  const animatedDays = Math.round(data.total_days * progress);
+  const animatedEarnings = Math.round(earnings * progress);
 
   return (
     <CardShell tone={tone} eyebrow="TOTAL PLAYTIME" userName={userName} userAvatarUrl={userAvatarUrl} footerRight="POWERED BY STEAM">
@@ -180,7 +204,7 @@ export default function TotalHours({ tone, data, userName, userAvatarUrl }: Prop
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {data.total_hours.toLocaleString()}
+            {animatedHours.toLocaleString()}
           </div>
           <div
             style={{
@@ -209,7 +233,7 @@ export default function TotalHours({ tone, data, userName, userAvatarUrl }: Prop
               letterSpacing: '0.02em',
             }}
           >
-            쉬지 않고 플레이하면 약 <span style={{ color: tone.headline, fontWeight: 700 }}>{data.total_days}일</span>
+            쉬지 않고 플레이하면 약 <span style={{ color: tone.headline, fontWeight: 700 }}>{animatedDays}일</span>
           </div>
           <div
             style={{
@@ -219,7 +243,7 @@ export default function TotalHours({ tone, data, userName, userAvatarUrl }: Prop
               letterSpacing: '0.02em',
             }}
           >
-            최저시급으로는 <span style={{ color: tone.headline, fontWeight: 700 }}>₩{earnings.toLocaleString('ko-KR')}</span>
+            최저시급으로는 <span style={{ color: tone.headline, fontWeight: 700 }}>₩{animatedEarnings.toLocaleString('ko-KR')}</span>
           </div>
         </div>
 

@@ -55,7 +55,7 @@ export default function AllTimeTopGames({ tone, games, userName, userAvatarUrl }
         >
           가장 많이
           <br />
-          머물었던
+          머물렀던
         </h1>
       </div>
 
