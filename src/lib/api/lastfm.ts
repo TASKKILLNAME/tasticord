@@ -226,6 +226,93 @@ export async function getTracksGenreDistribution(
   return { genres, totalTracks: tracksWithGenre };
 }
 
+// 아티스트 태그 중 장르가 아닌 노이즈 제거용
+// (Last.fm 태그는 사용자 라벨링이라 "seen live", "favorites", "male vocalists" 같은 비-장르 태그가 섞임)
+const ARTIST_TAG_BLACKLIST = new Set([
+  'seen live', 'want to see live',
+  'favorite', 'favorites', 'favourite', 'favourites',
+  'love', 'loved', 'awesome', 'beautiful', 'amazing', 'best', 'cool', 'good',
+  'male vocalists', 'female vocalists', 'male vocalist', 'female vocalist',
+  'vocalists', 'vocalist',
+  'american', 'british', 'english', 'swedish', 'japanese', 'german', 'french',
+  // 'korean'은 K-Pop과 별개 의미라 위에 제외했지만 GENRE_KO에는 '한국 음악'으로 매핑되어 있어 유지함
+]);
+
+// "80s", "90s", "2010s" 같은 연대 태그 정규식
+const DECADE_TAG_RE = /^(19|20)?\d0s$/;
+
+function isArtistTagNoise(tag: string): boolean {
+  if (ARTIST_TAG_BLACKLIST.has(tag)) return true;
+  if (DECADE_TAG_RE.test(tag)) return true;
+  return false;
+}
+
+// 한 아티스트의 Top Tags(장르) 조회
+// Last.fm tag.count는 0~100 인기 점수 (해당 아티스트한테 그 태그를 단 사람 비율 정규화값)
+export async function getArtistTopTags(artist: string): Promise<string[]> {
+  const apiKey = process.env.LASTFM_API_KEY;
+  if (!apiKey) throw new Error('LASTFM_API_KEY is not set');
+
+  const params = new URLSearchParams({
+    method: 'artist.getTopTags',
+    artist,
+    api_key: apiKey,
+    autocorrect: '1', // 오타 자동 보정 (K-pop 아티스트 영문 표기 흔들림 대응)
+    format: 'json',
+  });
+
+  const res = await fetch(`${LASTFM_API_BASE}?${params}`);
+  if (!res.ok) return [];
+
+  const data = await res.json();
+  if (data.error || !data.toptags?.tag) return [];
+
+  // count 20 미만은 신뢰도가 낮아 컷, 상위 10개만 사용
+  return (data.toptags.tag as { name: string; count: number }[])
+    .filter((t) => t.count >= 20 && !isArtistTagNoise(t.name.toLowerCase()))
+    .slice(0, 10)
+    .map((t) => t.name.toLowerCase());
+}
+
+// 여러 아티스트의 태그를 가중 집계해 장르 분포 반환
+// (Wrapped 카드 3번 — Top Genres 도넛 차트용)
+export async function getArtistsGenreDistribution(
+  artistNames: string[]
+): Promise<{ genres: { name: string; count: number; percentage: number }[]; totalArtists: number }> {
+  const genreCount: Record<string, number> = {};
+  let artistsWithGenre = 0;
+
+  // rate limit 방지를 위해 5개씩 배치 (Last.fm 권장: 평균 5req/s/IP)
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < artistNames.length; i += BATCH_SIZE) {
+    const batch = artistNames.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(batch.map((n) => getArtistTopTags(n)));
+
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value.length > 0) {
+        artistsWithGenre++;
+        // 상위 태그일수록 가중치 높게 — 첫 태그가 가장 대표적
+        result.value.forEach((tag, idx) => {
+          const weight = idx === 0 ? 4 : idx === 1 ? 3 : idx === 2 ? 2 : 1;
+          const koTag = toKoreanGenre(tag);
+          genreCount[koTag] = (genreCount[koTag] || 0) + weight;
+        });
+      }
+    }
+  }
+
+  const totalWeight = Object.values(genreCount).reduce((sum, c) => sum + c, 0);
+  const genres = Object.entries(genreCount)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => ({
+      name,
+      count,
+      percentage: totalWeight > 0 ? Math.round((count / totalWeight) * 100) : 0,
+    }));
+
+  return { genres, totalArtists: artistsWithGenre };
+}
+
 // Last.fm에서 곡의 listeners 수 조회
 export async function getTrackListeners(artist: string, track: string): Promise<number | null> {
   const apiKey = process.env.LASTFM_API_KEY;
