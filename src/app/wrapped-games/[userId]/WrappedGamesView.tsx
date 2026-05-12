@@ -3,6 +3,8 @@
 'use client';
 
 import WrappedSlider from '@/components/wrapped/WrappedSlider';
+import CoverCard from '@/components/wrapped/cards/CoverCard';
+import ClosingCard from '@/components/wrapped/cards/ClosingCard';
 import RecentTopGames from '@/components/wrapped/cards/games/RecentTopGames';
 import Obsession from '@/components/wrapped/cards/games/Obsession';
 import AllTimeTopGames from '@/components/wrapped/cards/games/AllTimeTopGames';
@@ -116,7 +118,16 @@ export default function WrappedGamesView({ report, tone }: Props) {
     />
   );
 
-  const cards = [card1, card2, card3, card4, card5, card6];
+  const cover = (
+    <CoverCard key="0" tone={tone} type="game" userName={userName} userAvatarUrl={userAvatarUrl} />
+  );
+
+  const closing = (
+    <ClosingCard key="closing" tone={tone} type="game" userName={userName} userAvatarUrl={userAvatarUrl} />
+  );
+
+  // 2번(RecentTopGames)과 3번(Obsession) 순서 교체 — Obsession을 먼저 보여주고 리스트는 뒤로
+  const cards = [cover, card2, card1, card3, card4, card5, card6, closing];
 
   return (
     <div
@@ -132,24 +143,6 @@ export default function WrappedGamesView({ report, tone }: Props) {
       }}
     >
       <WrappedSlider tone={tone} cards={cards} />
-
-      <a
-        href="/auth/login"
-        style={{
-          marginTop: 8,
-          padding: '12px 20px',
-          borderRadius: 999,
-          background: tone.fg,
-          color: tone.bg,
-          fontSize: 13,
-          fontWeight: 600,
-          fontFamily: 'var(--font-pretendard)',
-          letterSpacing: '-0.01em',
-          textDecoration: 'none',
-        }}
-      >
-        나도 내 게임 카드 만들기
-      </a>
     </div>
   );
 }

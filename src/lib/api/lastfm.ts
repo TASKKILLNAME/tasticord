@@ -1,3 +1,5 @@
+import { getCachedMetadata, setCachedMetadata } from '@/lib/wrapped/metadata-cache';
+
 const LASTFM_API_BASE = 'https://ws.audioscrobbler.com/2.0/';
 
 // 영어 장르명 → 한글 매핑
@@ -247,11 +249,25 @@ function isArtistTagNoise(tag: string): boolean {
   return false;
 }
 
-// 한 아티스트의 Top Tags(장르) 조회
+// 한 아티스트의 Top Tags(장르) 조회 — 전역 메타데이터 캐시 (30일 TTL) 적용
+// 같은 아티스트는 모든 사용자가 공유 → 한 번 조회로 영구적 절감
 // Last.fm tag.count는 0~100 인기 점수 (해당 아티스트한테 그 태그를 단 사람 비율 정규화값)
+const LASTFM_ARTIST_TAG_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 export async function getArtistTopTags(artist: string): Promise<string[]> {
   const apiKey = process.env.LASTFM_API_KEY;
   if (!apiKey) throw new Error('LASTFM_API_KEY is not set');
+
+  // 정규화된 캐시 키 (대소문자/공백 차이 무시)
+  const cacheKey = artist.trim().toLowerCase();
+  if (cacheKey.length > 0) {
+    const cached = await getCachedMetadata<string[]>(
+      'lastfm_artist_tags',
+      cacheKey,
+      LASTFM_ARTIST_TAG_TTL_MS
+    );
+    if (cached) return cached;
+  }
 
   const params = new URLSearchParams({
     method: 'artist.getTopTags',
@@ -268,10 +284,16 @@ export async function getArtistTopTags(artist: string): Promise<string[]> {
   if (data.error || !data.toptags?.tag) return [];
 
   // count 20 미만은 신뢰도가 낮아 컷, 상위 10개만 사용
-  return (data.toptags.tag as { name: string; count: number }[])
+  const tags = (data.toptags.tag as { name: string; count: number }[])
     .filter((t) => t.count >= 20 && !isArtistTagNoise(t.name.toLowerCase()))
     .slice(0, 10)
     .map((t) => t.name.toLowerCase());
+
+  // 빈 결과여도 캐시 (재호출 막기 — 30일 동안 같은 아티스트면 fresh skip)
+  if (cacheKey.length > 0) {
+    await setCachedMetadata('lastfm_artist_tags', cacheKey, tags);
+  }
+  return tags;
 }
 
 // 여러 아티스트의 태그를 가중 집계해 장르 분포 반환

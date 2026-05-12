@@ -1,5 +1,8 @@
 // 게임 카드 2 — 최근 2주의 Obsession (큰 hero 이미지 + 큰 숫자)
 // SINGLE FOCUS 템플릿 — 음악 TopAlbum과 유사하지만 가로형 게임 아트
+// hero 이미지에 CRT 부팅 애니메이션 — 가로 라인이 펼쳐지며 화면 켜지는 효과
+'use client';
+
 import CardShell from '../../CardShell';
 import { shade } from '../../shade';
 import type { Tone } from '@/lib/wrapped/tones';
@@ -21,6 +24,24 @@ export default function Obsession({ tone, obsession, userName, userAvatarUrl }: 
 
   return (
     <CardShell tone={tone} eyebrow="최근 2주" userName={userName} userAvatarUrl={userAvatarUrl} footerRight="POWERED BY STEAM">
+      {/* CRT 부팅 효과 keyframes — 가로 라인 → 전체 펼침 + 밝기/채도 settle
+          1. 0~10%:  중앙에 흰 가로선만 (scaleY 거의 0, brightness 6배, 채도 거의 0)
+          2. 10~30%: 세로로 펼쳐짐 (scaleY 0→1, brightness 6→2.5, 채도 0→0.6)
+          3. 30~60%: 밝기/채도 정상으로 settle
+          4. 60~100%: 안정 */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            @keyframes obsession-crt-on {
+              0%   { transform: scaleY(0.012); opacity: 0; filter: brightness(0) saturate(0); }
+              10%  { transform: scaleY(0.012); opacity: 1; filter: brightness(6) saturate(0.2); }
+              30%  { transform: scaleY(1); opacity: 1; filter: brightness(2.6) saturate(0.6); }
+              55%  { transform: scaleY(1); opacity: 1; filter: brightness(1.3) saturate(0.95); }
+              100% { transform: scaleY(1); opacity: 1; filter: brightness(1) saturate(1); }
+            }
+          `,
+        }}
+      />
       <div style={{ padding: '28px 24px 0' }}>
         <div
           style={{
@@ -65,6 +86,7 @@ export default function Obsession({ tone, obsession, userName, userAvatarUrl }: 
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+            animation: 'obsession-crt-on 1.2s ease-out 0.15s both',
           }}
         />
       </div>

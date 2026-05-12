@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Share2, RefreshCw, ExternalLink } from 'lucide-react';
+import { Music, Share2, RefreshCw, ExternalLink } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/components/ui/ToastProvider';
 import {
@@ -133,9 +133,9 @@ export default function WrappedSection() {
   // Spotify 미연동
   if (!hasSpotify) {
     return (
-      <div className="rounded-2xl p-6 mb-6 bg-gradient-to-br from-purple-500/15 to-pink-500/10 border border-purple-500/20">
+      <div className="rounded-2xl p-6 mb-6 bg-gradient-to-br from-green-500/15 to-emerald-500/10 border border-green-500/20">
         <div className="flex items-start gap-3 mb-3">
-          <Sparkles className="w-5 h-5 text-purple-400 mt-0.5" />
+          <Music className="w-5 h-5 text-green-400 mt-0.5" />
           <div>
             <div className="font-semibold mb-1">음악 카드</div>
             <div className="text-sm text-zinc-400 leading-relaxed">
@@ -145,7 +145,7 @@ export default function WrappedSection() {
         </div>
         <button
           onClick={() => router.push('/profile')}
-          className="text-sm font-semibold text-purple-300 hover:text-purple-200 transition"
+          className="text-sm font-semibold text-green-300 hover:text-green-200 transition"
         >
           프로필에서 Spotify 연동하기 →
         </button>
@@ -156,9 +156,9 @@ export default function WrappedSection() {
   // 카드 미생성 — 기간 선택 + 만들기
   if (!report) {
     return (
-      <div className="rounded-2xl p-6 mb-6 bg-gradient-to-br from-purple-500/15 to-pink-500/10 border border-purple-500/20">
+      <div className="rounded-2xl p-6 mb-6 bg-gradient-to-br from-green-500/15 to-emerald-500/10 border border-green-500/20">
         <div className="flex items-start gap-3 mb-4">
-          <Sparkles className="w-5 h-5 text-purple-400 mt-0.5" />
+          <Music className="w-5 h-5 text-green-400 mt-0.5" />
           <div>
             <div className="font-semibold mb-1">음악 카드 만들기</div>
             <div className="text-sm text-zinc-400 leading-relaxed">
@@ -188,7 +188,7 @@ export default function WrappedSection() {
   const willRegenerate = selectedRange !== report.time_range;
 
   return (
-    <div className="rounded-2xl p-6 mb-6 bg-gradient-to-br from-purple-500/15 to-pink-500/10 border border-purple-500/20">
+    <div className="rounded-2xl p-6 mb-6 bg-gradient-to-br from-green-500/15 to-emerald-500/10 border border-green-500/20">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
           <div className="font-semibold mb-1">내 음악 카드</div>
@@ -197,7 +197,7 @@ export default function WrappedSection() {
             {generatedAt.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })} 생성
           </div>
         </div>
-        <Sparkles className="w-5 h-5 text-purple-400" />
+        <Music className="w-5 h-5 text-green-400" />
       </div>
 
       {/* 기간 변경하면 다시 만들기 버튼 활성화 */}
@@ -229,7 +229,7 @@ export default function WrappedSection() {
           title={willRegenerate ? '선택한 기간으로 다시 만들기' : '다시 만들기'}
           className={`px-3 py-2.5 rounded-xl font-semibold text-white transition disabled:opacity-50 ${
             willRegenerate
-              ? 'bg-purple-500 hover:bg-purple-400'
+              ? 'bg-green-500 hover:bg-green-400'
               : 'bg-zinc-800 hover:bg-zinc-700'
           }`}
         >
