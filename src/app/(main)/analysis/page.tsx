@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client';
 import AiReportCard from '@/components/analysis/AiReportCard';
 import TasteSummary from '@/components/analysis/TasteSummary';
 import SimilarFriends from '@/components/analysis/SimilarFriends';
+import WrappedSection from '@/components/analysis/WrappedSection';
+import WrappedGamesSection from '@/components/analysis/WrappedGamesSection';
 
 export default function AnalysisPage() {
   const router = useRouter();
@@ -36,6 +38,9 @@ export default function AnalysisPage() {
   return (
     <div className="max-w-3xl mx-auto p-8 animate-fade-up">
       <h2 className="text-2xl font-bold mb-8">취향 분석</h2>
+
+      <WrappedSection />
+      <WrappedGamesSection />
 
       {loading ? (
         <div className="space-y-4">
