@@ -92,7 +92,7 @@ function AxisCard({
       {axis.newFromFriend.length > 0 && (
         <div>
           <div className="text-[11px] text-zinc-500 mb-1.5">
-            {friendName}님에게 배워볼 {axis.itemsLabel}
+            {friendName}님이 좋아하는 {axis.itemsLabel}
           </div>
           <ChipRow items={axis.newFromFriend} />
         </div>
