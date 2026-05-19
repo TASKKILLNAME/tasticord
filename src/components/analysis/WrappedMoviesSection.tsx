@@ -27,16 +27,26 @@ export default function WrappedMoviesSection() {
       if (!user) return;
       setUserId(user.id);
 
-      const [{ data: existing }, { count }] = await Promise.all([
+      // netflix_history는 앱 전역에서 admin API(/api/netflix/history)로만 읽음.
+      // 브라우저 클라이언트 직접 조회는 RLS 때문에 0건으로 잡혀 hasNetflix가 항상 false였음
+      // → my-taste 페이지와 동일하게 admin API의 totalCount 사용.
+      const [{ data: existing }, netflixRes] = await Promise.all([
         supabase.from('wrapped_movies_reports').select('*').eq('user_id', user.id).maybeSingle(),
-        supabase
-          .from('netflix_history')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', user.id),
+        fetch('/api/netflix/history'),
       ]);
 
+      let netflixCount = 0;
+      try {
+        if (netflixRes.ok) {
+          const nf = await netflixRes.json();
+          netflixCount = nf.totalCount ?? 0;
+        }
+      } catch {
+        netflixCount = 0;
+      }
+
       setReport(existing as WrappedMoviesReport | null);
-      setHasNetflix((count ?? 0) > 0);
+      setHasNetflix(netflixCount > 0);
       setLoading(false);
     }
     load();
